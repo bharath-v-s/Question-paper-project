@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 import pandas as pd
 import random
 import os
+
 from docx import Document
 from docx.shared import Pt,Cm
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -28,7 +29,6 @@ class Department(db.Model):
     school_id = db.Column(db.Integer, db.ForeignKey('school.id'))
     name = db.Column(db.String(100))
     level = db.Column(db.String(5))
-    pattern_name = db.Column(db.String(50), default="Pattern_1") # Map to Pattern ID
     subjects = db.relationship('Subject', backref='dept', lazy=True)
     
 class GridType(db.Model):
@@ -45,18 +45,103 @@ class Subject(db.Model):
     code = db.Column(db.String(20))
     semester = db.Column(db.Integer)
     pattern_name = db.Column(db.String(50), default="Pattern_1")
+    
 
-class QuestionBank(db.Model):
+class ExamPattern(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
-    unit = db.Column(db.Integer)
-    marks = db.Column(db.Integer)
-    question = db.Column(db.Text)
-    q_type = db.Column(db.String(20))
+    name = db.Column(db.String(50), unique=True, nullable=False) # e.g., "Pattern_1"
+    total_marks = db.Column(db.Integer, default=100)
+    sections = db.relationship('PatternSection', backref='pattern', lazy=True, cascade="all, delete-orphan")
+
+class PatternSection(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    pattern_id = db.Column(db.Integer, db.ForeignKey('exam_pattern.id'), nullable=False)
+    section_name = db.Column(db.String(10), nullable=False) # e.g., "SecA"
+    count = db.Column(db.Integer, nullable=False)
+    total_in_paper = db.Column(db.Integer, nullable=False) # The 'total' field in your dict
+    marks = db.Column(db.Integer, nullable=False)
+    note = db.Column(db.Text)
 
 
 
-# --- PATTERNS DATA ---
+if not os.path.exists('uploads'):
+    os.makedirs('uploads')
+
+question_bank_df = None
+def load_question_bank(filepath):
+    """Loads the cleaned question bank without skipping rows."""
+    global question_bank_df
+    try:
+        if filepath.endswith('.csv'):
+            df = pd.read_csv(filepath)
+        elif filepath.endswith('.xlsx'):
+            df = pd.read_excel(filepath)
+        
+        df.columns = df.columns.str.strip()
+        # ['Unit', 'Marks','K Level', 'Question'] is mandatory in the uploaded file
+        required = ['Unit', 'Marks','K Level', 'Question'] 
+        if not all(col in df.columns for col in required):
+            return False
+            
+        # Standardize the 'Type' column
+        if 'Type' not in df.columns:
+            # Create the column if it's missing
+            df['Type'] = 'Theory'
+        else:
+            # Clean existing values
+            df['Type'] = df['Type'].fillna('Theory').astype(str).str.strip()
+            
+        # Clean other columns
+        df['Question'] = df['Question'].astype(str).str.strip()
+        df['Marks'] = pd.to_numeric(df['Marks'], errors='coerce').fillna(0).astype(int)
+        df['Unit'] = pd.to_numeric(df['Unit'], errors='coerce').fillna(0).astype(int)
+        df['K Level'] = df['K Level'].astype(str).str.strip().str.upper()
+        
+        df = df.dropna(subset=['Marks', 'Unit', 'Question', 'K Level'])
+        question_bank_df = df
+        return True
+    except Exception as e:
+        print(f"Error loading file: {e}")
+        return False
+    
+def sample_from_unit(unit_no, marks, count, q_type=None):
+    """Filters bank by Unit, Marks, and optionally Theory/Problem type."""
+    global question_bank_df
+    if question_bank_df is None or count <= 0:
+        return []
+
+    # 1. Ensure the DataFrame columns are numeric to match the function arguments
+    # 2. Strip whitespace from the Type column for clean comparison
+    temp_df = question_bank_df.copy()
+    temp_df['Marks'] = pd.to_numeric(temp_df['Marks'], errors='coerce')
+    temp_df['Unit'] = pd.to_numeric(temp_df['Unit'], errors='coerce')
+    temp_df['Type'] = temp_df['Type'].astype(str).str.strip()
+
+    # Filter by Unit and Marks
+    mask = (temp_df['Unit'] == int(unit_no)) & (temp_df['Marks'] == int(marks))
+    
+    # Optional Type filtering (Theory/Problem) 
+    if q_type and 'Type' in temp_df.columns:
+        # Make the comparison case-insensitive and remove spaces
+        mask = mask & (temp_df['Type'].astype(str).str.strip().str.lower() == q_type.lower().strip())
+    
+    pool = temp_df[mask]
+    
+    # DEBUG: See why Section B/C might be empty
+    print(f"Pool size for Unit {unit_no}, {marks}M: {len(pool)}") 
+    
+    if len(pool) == 0:
+        return [] # No questions found matching these exact criteria
+    
+    if len(pool) < count:
+        return pool.to_dict('records') # Return all available if fewer than requested
+    
+    return pool.sample(n=count).to_dict('records')
+
+
+# --- EXAM PATTERNS DEFINED AS DICT (for initial migration) ---
+# remove the triple quotes below after migration is done
+"""# --- PATTERNS DATA ---
 EXAM_PATTERNS = {
     "Pattern_1": {
         "SecA": {"count": 10, "total": 12, "marks": 3, "note": "Answer any ten questions"},
@@ -83,104 +168,25 @@ EXAM_PATTERNS = {
         "SecB": {"count": 5, "total": 8, "marks": 7, "note": "Answer any five questions"},
         "SecC": {"count": 3, "total": 5, "marks": 15, "note": "Answer any three questions"},
         "total_marks": 100
-    },"Pattern_6": {
-        "SecA": {"count": 10, "total": 12, "marks": 2, "note": "Answer any Ten questions"},
-        "SecB": {"count": 5, "total": 8, "marks": 8, "note": "Answer any five questions"},
-        "SecC": {"count": 2, "total": 4, "marks": 20, "note": "Answer any two questions"},
-        "total_marks": 100
-    },"Pattern_7": {
-        "SecA": {"count": 10, "total": 10, "marks": 3, "note": "Answer all questions"},
-        "SecB": {"count": 5, "total": 7, "marks": 6, "note": "Answer any five questions"},
-        "SecC": {"count": 4, "total": 6, "marks": 10, "note": "Answer any four questions"},
-        "total_marks": 100
-    },"Pattern_8": {
-        "SecA": {"count": 10, "total": 10, "marks": 2 , "note": "Answer all questions"},
-        "SecB": {"count": 5, "total": 7, "marks": 7, "note": "Answer any five questions"},
-        "SecC": {"count": 3, "total": 5, "marks": 15, "note": "Answer any three questions"},
-        "total_marks": 100
-    },"Pattern_9": {
-        "SecA": {"count": 10, "total": 10, "marks": 2, "note": "Answer all questions"},
-        "SecB": {"count": 8, "total": 8, "marks": 80, "note": "Answer all questions"},
-        "total_marks": 100
-    },
-    "Pattern_10": {
-        "SecA": {"count": 50, "total": 50, "marks": 2, "note": "Answer all questions"},
-        "total_marks": 100
     }
-    
-}
 
-if not os.path.exists('uploads'):
-    os.makedirs('uploads')
+}"""
+# Predefined Exam Patterns (moved to DB migration section)
+def get_pattern_dict(pattern_name):
+    pattern = ExamPattern.query.filter_by(name=pattern_name).first()
+    if not pattern:
+        return None
+    
+    pattern_dict = {"total_marks": pattern.total_marks}
+    for sec in pattern.sections:
+        pattern_dict[sec.section_name] = {
+            "count": sec.count,
+            "total": sec.total_in_paper,
+            "marks": sec.marks,
+            "note": sec.note
+        }
+    return pattern_dict
 
-question_bank_df = None
-def load_question_bank(filepath):
-    """Loads the cleaned question bank without skipping rows."""
-    global question_bank_df
-    try:
-        if filepath.endswith('.csv'):
-            df = pd.read_csv(filepath)
-        elif filepath.endswith('.xlsx'):
-            df = pd.read_excel(filepath)
-        
-        df.columns = df.columns.str.strip()
-        
-        required = ['Sl. No', 'Unit', 'Marks', 'Question'] 
-        if not all(col in df.columns for col in required):
-            return False
-            
-        # Standardize the 'Type' column
-        if 'Type' not in df.columns:
-            # Create the column if it's missing
-            df['Type'] = 'Theory'
-        else:
-            # Clean existing values
-            df['Type'] = df['Type'].fillna('Theory').astype(str).str.strip()
-            
-        # Clean other columns
-        df['Question'] = df['Question'].astype(str).str.strip()
-        df['Marks'] = pd.to_numeric(df['Marks'], errors='coerce').fillna(0).astype(int)
-        df['Unit'] = pd.to_numeric(df['Unit'], errors='coerce').fillna(0).astype(int)
-        
-        df = df.dropna(subset=['Marks', 'Unit', 'Question'])
-        question_bank_df = df
-        return True
-    except Exception as e:
-        print(f"Error loading file: {e}")
-        return False
-    
-def sample_from_unit(unit_no, marks, count, q_type=None):
-    """Filters bank by Unit, Marks, and optionally Theory/Problem type."""
-    global question_bank_df
-    if question_bank_df is None or count <= 0:
-        return []
-
-    # 1. Ensure the DataFrame columns are numeric to match the function arguments
-    # 2. Strip whitespace from the Type column for clean comparison
-    temp_df = question_bank_df.copy()
-    temp_df['Marks'] = pd.to_numeric(temp_df['Marks'], errors='coerce')
-    temp_df['Unit'] = pd.to_numeric(temp_df['Unit'], errors='coerce')
-
-    # Filter by Unit and Marks
-    mask = (temp_df['Unit'] == int(unit_no)) & (temp_df['Marks'] == int(marks))
-    
-    # Optional Type filtering (Theory/Problem) 
-    if q_type and 'Type' in temp_df.columns:
-        # Make the comparison case-insensitive and remove spaces
-        mask = mask & (temp_df['Type'].astype(str).str.strip().str.lower() == q_type.lower().strip())
-    
-    pool = temp_df[mask]
-    
-    # DEBUG: See why Section B/C might be empty
-    print(f"Pool size for Unit {unit_no}, {marks}M: {len(pool)}") 
-    
-    if len(pool) == 0:
-        return [] # No questions found matching these exact criteria
-    
-    if len(pool) < count:
-        return pool.to_dict('records') # Return all available if fewer than requested
-    
-    return pool.sample(n=count).to_dict('records')
 # --- ROUTES ---
 @app.route('/')
 def index():
@@ -189,14 +195,13 @@ def index():
 
 @app.route('/get_departments/<int:sid>/<level>')
 def get_depts(sid, level):
+    #filters departments by both school_id and level
     depts = Department.query.filter_by(school_id=sid, level=level).all()
     return jsonify([{'id': d.id, 'name': d.name} for d in depts])
 
-# --- Updated Route in app.py ---
-
 @app.route('/get_subjects/<int:dept_id>/<int:semester>') # Added <int:semester> to the URL
 def get_subjects(dept_id, semester):
-    # This now correctly receives both arguments from the URL
+    #filters subjects by both dept_id and semester
     subjects = Subject.query.filter_by(dept_id=dept_id, semester=semester).all()
     return jsonify([{'id': s.id, 'name': s.name} for s in subjects])
 
@@ -210,30 +215,28 @@ def get_pattern_details(dept_id, subject_id):
     # Fetch Grid Configuration
     grid_config = db.session.get(GridType, subject.grid_type_id)
     
-    # Fetch Pattern assigned to Subject
-    pattern_key = subject.pattern_name if subject.pattern_name else "Pattern_1"
-    pattern_rules = EXAM_PATTERNS.get(pattern_key, EXAM_PATTERNS["Pattern_1"])
+    # Fetch pattern from Database instead of EXAM_PATTERNS dict
+    pattern_rules = get_pattern_dict(subject.pattern_name or "Pattern_1")
     
-    # Return keys that JavaScript expects
     return jsonify({
         "config": pattern_rules,
         "is_split": grid_config.has_problem_column if grid_config else False,
-        "pattern_id": pattern_key
+        "pattern_id": subject.pattern_name or "Pattern_1"
     })
 
-
+#uploads will create a new folder named uploads in the project directory to store uploaded files
 @app.route('/upload', methods=['POST'])
 def upload():
     file = request.files.get('file')
     if file and file.filename != '':
         path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
-        #file.save(path)
+        file.save(path)
         
         # Uses your helper function to load data into question_bank_df
         success = load_question_bank(path) 
         
         if success:
-            # Return JSON instead of redirecting
+            # return success response in upload in index.html
             return jsonify({
                 "status": "success", 
                 "message": f"Question Bank '{file.filename}' loaded successfully!"
@@ -241,7 +244,7 @@ def upload():
         else:
             return jsonify({
                 "status": "error", 
-                "message": "Missing required columns: Sl. No, Unit, Marks, Question"
+                "message": "Missing required columns: Sl. No, Unit, Marks, K Level, Question"
             }), 400
             
     return jsonify({"status": "error", "message": "No file selected"}), 400
@@ -267,8 +270,7 @@ def generate():
 
     # 2. Identify the pattern (e.g., 'Pattern_1')
     pattern_key = subject_obj.pattern_name if subject_obj.pattern_name else "Pattern_1"
-    pattern_data = EXAM_PATTERNS.get(pattern_key, EXAM_PATTERNS["Pattern_1"])
-
+    pattern_data = get_pattern_dict(pattern_key)
     selected_questions = []
 
     # 3. Process the grid inputs
@@ -329,7 +331,10 @@ def swap(index):
         session['current_paper'] = paper
         session.modified = True
         # Return only the new question data
-        return jsonify({"success": True, "new_question": new_q['Question']})
+        return jsonify({"success": True,
+                        "new_question": new_q['Question'],
+                        "new_klevel": new_q['K Level'] # Return new K-Level for AJAX
+                        })
     
     return jsonify({"success": False, "message": "No alternative found"}), 404
 
@@ -345,8 +350,7 @@ def download_docx():
     
     subject_obj = db.session.get(Subject, subject_id) if subject_id else None
     pattern_key = subject_obj.pattern_name if subject_obj else "Pattern_1"
-    pattern_data = EXAM_PATTERNS.get(pattern_key, EXAM_PATTERNS["Pattern_1"])
-
+    pattern_data = get_pattern_dict(pattern_key)
     # 2. Convert to DataFrame to handle grouping and sorting
     df_paper = pd.DataFrame(questions)
     
@@ -368,14 +372,17 @@ def download_docx():
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_after = Pt(0)
-    run = title.add_run('GURU NANAK COLLEGE (AUTONOMOUS), CHENNAI – 42.')
+    run = title.add_run('Weightage based QUESTION PAPER generator')
     run.font.size = Pt(13)
     run.bold = True
     
     exam_info = doc.add_paragraph()
     exam_info.alignment = WD_ALIGN_PARAGRAPH.CENTER
     exam_info.paragraph_format.space_after = Pt(0)
+    # --- exam info (static)---
     exam_info.add_run('NOV 2025\n').bold = True
+    # --- exam info (dynamic subject name and code)---
+    #exam_info.add_run(f"{subject_name if subject_name else 'SUBJECT NAME'}\
     exam_info.add_run(f"{subject_obj.code if subject_obj else 'CODE'}").bold = True
 
     # --- Header: Marks & Time ---
@@ -447,4 +454,27 @@ if __name__ == '__main__':
             db.session.commit()
             db.session.add(Department(school_id=s1.id, name="BCA", level="UG"))
             db.session.commit()
+            #remove below code after first run(no need to migrate multiple times(it will duplicate data or cause errors))
+        """if not ExamPattern.query.first():
+            print("Migrating patterns to database...")
+            for p_name, p_data in EXAM_PATTERNS.items():
+                new_pattern = ExamPattern(name=p_name, total_marks=p_data['total_marks'])
+                db.session.add(new_pattern)
+                db.session.flush() # Get the ID for section mapping
+
+                for sec_key, sec_val in p_data.items():
+                    if sec_key.startswith('Sec'):
+                        new_section = PatternSection(
+                            pattern_id=new_pattern.id,
+                            section_name=sec_key,
+                            count=sec_val['count'],
+                            total_in_paper=sec_val['total'],
+                            marks=sec_val['marks'],
+                            note=sec_val['note']
+                        )
+                        db.session.add(new_section)
+            
+            db.session.commit()
+            print("Pattern migration complete.")"""
+
     app.run(debug=True)

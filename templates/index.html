@@ -39,18 +39,19 @@
                 </select>
             </div>
             <div class="col-md-4">
-                <label class="form-label">Semester</label>
-                <select id="semester" class="form-select" onchange="loadSubjects()">
-                    <option value="">Select Semester</option>
-                </select>
-            </div>
-            <div class="col-md-6">
                 <label class="form-label">Department</label>
                 <select id="dept" class="form-select" onchange="loadSubjects()">
                     <option value="">Select Department</option>
                 </select>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
+                <label class="form-label">Semester</label>
+                <select id="semester" class="form-select" onchange="loadSubjects()">
+                    <option value="">Select Semester</option>
+                </select>
+            </div>
+            
+            <div class="col-md-4">
                 <label class="form-label">Subject</label>
                 <select id="subject" class="form-select" onchange="updateSubjectAndGrid()">
                     <option value="">Select Subject</option>
@@ -58,23 +59,10 @@
             </div>
         </div>
 
-        <div class="row mb-4">
-            <div class="col-md-12">
-                <div class="p-3 border rounded bg-light">
-                    <label class="form-label fw-bold">1. Upload Question Bank (Excel/CSV)</label>
-                    <div class="input-group">
-                        <input type="file" id="bankFile" class="form-control">
-                        <button type="button" class="btn btn-success" onclick="uploadBank()">Upload Bank</button>
-                    </div>
-                    <div id="uploadStatus" class="mt-2 small fw-bold"></div>
-                </div>
-            </div>
-        </div>
-
-        <form action="/generate" method="post" id="generate-form">
+        <form action="/generate" method="post" id="generate-form" onsubmit="return checkGridValidity()">
             <input type="hidden" name="subject_id" id="hidden_subject_id">
             
-            <h4>2. Unit-wise Weightage Grid</h4>
+            <h5>Unit-wise Weightage Grid</h5>
             <p class="text-muted small">Enter the number of questions to pick from each unit.</p>
             <table class="table table-bordered text-center align-middle">
                 <thead class="table-primary" id="grid-header"></thead>
@@ -82,11 +70,24 @@
                     <tr><td colspan='4'>Please select a subject to see the weightage grid.</td></tr>
                 </tbody>
             </table>
-
-            <div class="mt-4">
-                <button type="submit" class="btn btn-primary btn-lg w-100">3. Generate Paper</button>
+            <div class="row mb-4">
+            <div class="col-md-6">
+                <h5>Upload Question Bank (Excel/CSV)</h5>
+                <div class="p-3 border rounded bg-light">
+                    <div class="input-group">
+                        <input type="file" id="bankFile" class="form-control" accept=".csv, .xlsx, .xls">
+                        <button type="button" class="btn btn-success" onclick="uploadBank()">Upload Bank</button>
+                    </div>
+                    <div id="uploadStatus" class="mt-2 small fw-bold"></div>
+                </div>
+            </div>
+            <div class="d-flex justify-content-right mt-4">
+                <button type="submit" class="btn btn-primary btn-lg w-40">
+                    Generate Questions
+                </button>
             </div>
         </form>
+       
     </div>
 
 <script>
@@ -142,54 +143,155 @@
         }
     }
 
-    function renderGrid() {
-        let deptId = document.getElementById('dept').value;
-        let subjectId = document.getElementById('subject').value;
-        
-        if (!deptId || !subjectId || subjectId === "") {
-            document.getElementById('grid-header').innerHTML = "";
-            document.getElementById('grid').innerHTML = "<tr><td colspan='4'>Please select a subject to see the weightage grid.</td></tr>";
-            return;
+    function validateInput(input) {
+        const val = parseInt(input.value);
+        const max = parseInt(input.max);
+        const min = parseInt(input.min);
+
+        if (val > max) {
+            alert(`Maximum allowed for this section is ${max}`);
+            input.value = max;
+        } else if (val < min || isNaN(val)) {
+            input.value = 0;
         }
-
-        fetch(`/get_pattern_details/${deptId}/${subjectId}`)
-            .then(res => res.json())
-            .then(data => {
-                const pattern = data.config;
-                const isSplit = data.is_split;
-                
-                let gridHeader = document.getElementById('grid-header');
-                let gridBody = document.getElementById('grid');
-
-                let headerHtml = `<tr><th>Unit</th>`;
-                if (pattern.SecA) headerHtml += `<th>Sec A (${pattern.SecA.marks}M) ${isSplit ? 'T | P' : 'Theory'}</th>`;
-                if (pattern.SecB) headerHtml += `<th>Sec B (${pattern.SecB.marks}M) ${isSplit ? 'T | P' : 'Theory'}</th>`;
-                if (pattern.SecC) headerHtml += `<th>Sec C (${pattern.SecC.marks}M) ${isSplit ? 'T | P' : 'Theory'}</th>`;
-                headerHtml += `</tr>`;
-                gridHeader.innerHTML = headerHtml;
-
-                gridBody.innerHTML = '';
-                for (let i = 1; i <= 5; i++) {
-                    let row = `<tr><td>Unit ${i}</td>`;
-                    
-                    if (pattern.SecA) {
-                        row += `<td><input type="number" name="u${i}_SecA_t" class="form-control grid-input" value="0">` + 
-                               (isSplit ? ` | <input type="number" name="u${i}_SecA_p" class="form-control grid-input" value="0">` : "") + `</td>`;
-                    }
-                    if (pattern.SecB) {
-                        row += `<td><input type="number" name="u${i}_SecB_t" class="form-control grid-input" value="0">` + 
-                               (isSplit ? ` | <input type="number" name="u${i}_SecB_p" class="form-control grid-input" value="0">` : "") + `</td>`;
-                    }
-                    if (pattern.SecC) {
-                        row += `<td><input type="number" name="u${i}_SecC_t" class="form-control grid-input" value="0">` + 
-                               (isSplit ? ` | <input type="number" name="u${i}_SecC_p" class="form-control grid-input" value="0">` : "") + `</td>`;
-                    }
-                    row += `</tr>`;
-                    gridBody.innerHTML += row;
-                }
-            });
     }
 
+    function renderGrid() {
+    let deptId = document.getElementById('dept').value;
+    let subjectId = document.getElementById('subject').value;
+    
+    if (!deptId || !subjectId || subjectId === "") {
+        document.getElementById('grid-header').innerHTML = "";
+        document.getElementById('grid').innerHTML = "<tr><td colspan='4'>Please select a subject to see the weightage grid.</td></tr>";
+        return;
+    }
+
+    fetch(`/get_pattern_details/${deptId}/${subjectId}`)
+        .then(res => res.json())
+        .then(data => {
+            const pattern = data.config;
+            const isSplit = data.is_split;
+            
+            let gridHeader = document.getElementById('grid-header');
+            let gridBody = document.getElementById('grid');
+
+            let headerHtml = `<tr><th>Unit</th>`;
+            if (pattern.SecA) headerHtml += `<th>Sec A (${pattern.SecA.marks}M)</th>`;
+            if (pattern.SecB) headerHtml += `<th>Sec B (${pattern.SecB.marks}M)</th>`;
+            if (pattern.SecC) headerHtml += `<th>Sec C (${pattern.SecC.marks}M)</th>`;
+            headerHtml += `</tr>`;
+            gridHeader.innerHTML = headerHtml;
+
+            gridBody.innerHTML = '';
+            for (let i = 1; i <= 5; i++) {
+                let row = `<tr><td>Unit ${i}</td>`;
+                
+                const createInput = (secKey, typeSuffix) => {
+                    const sec = pattern[secKey];
+                    if (!sec) return "";
+                    // maxVal is the total questions allowed per UNIT in your logic
+                    return `<input type="number" 
+                                   name="u${i}_${secKey}_${typeSuffix}" 
+                                   data-section="${secKey}"
+                                   class="form-control grid-input section-${secKey}" 
+                                   value="0" min="0" 
+                                   oninput="calculateSectionTotals('${secKey}', ${sec.total})">`;
+                };
+
+                if (pattern.SecA) row += `<td>${createInput('SecA', 't')}${isSplit ? ' | ' + createInput('SecA', 'p') : ""}</td>`;
+                if (pattern.SecB) row += `<td>${createInput('SecB', 't')}${isSplit ? ' | ' + createInput('SecB', 'p') : ""}</td>`;
+                if (pattern.SecC) row += `<td>${createInput('SecC', 't')}${isSplit ? ' | ' + createInput('SecC', 'p') : ""}</td>`;
+                row += `</tr>`;
+                gridBody.innerHTML += row;
+            }
+
+            // Add Footer Row for Totals
+            // Inside the fetch call in renderGrid
+            let footerRow = `<tr class="table-info"><td><strong>TOTAL (Required)</strong></td>`;
+            if (pattern.SecA) footerRow += `<td><strong id="total-SecA">0</strong> / <span id="req-SecA">${pattern.SecA.total}</span></td>`;
+            if (pattern.SecB) footerRow += `<td><strong id="total-SecB">0</strong> / <span id="req-SecB">${pattern.SecB.total}</span></td>`;
+            if (pattern.SecC) footerRow += `<td><strong id="total-SecC">0</strong> / <span id="req-SecC">${pattern.SecC.total}</span></td>`;
+            footerRow += `</tr>`;
+            gridBody.innerHTML += footerRow;
+        });
+}
+    function calculateSectionTotals(sectionKey, maxAllowed) {
+    const inputs = document.querySelectorAll(`.section-${sectionKey}`);
+    const display = document.getElementById(`total-${sectionKey}`);
+    
+    let currentTotal = 0;
+    
+    // 1. First, calculate the sum as it stands in the inputs
+    inputs.forEach(input => {
+        let val = parseInt(input.value) || 0;
+        currentTotal += val;
+    });
+
+    // 2. If the new sum exceeds the pattern's total, find the culprit
+    if (currentTotal > maxAllowed) {
+        alert(`Warning: Total questions for Section ${sectionKey.slice(-1)} cannot exceed ${maxAllowed}!`);
+        
+        // Find the input that was just changed and reset it
+        // We look for the active element (the one the user just typed in)
+        if (document.activeElement && document.activeElement.classList.contains(`section-${sectionKey}`)) {
+            document.activeElement.value = 0;
+        }
+        
+        // 3. Recalculate the total after resetting the invalid input
+        currentTotal = 0;
+        inputs.forEach(input => {
+            currentTotal += (parseInt(input.value) || 0);
+        });
+    }
+
+    // 4. Update the UI with the corrected total
+    display.innerText = currentTotal;
+
+    // Apply color coding for user feedback
+    const required = parseInt(document.getElementById(`req-${sectionKey}`).innerText);
+    if (currentTotal === required) {
+        display.className = "text-success fw-bold";
+    } else if (currentTotal > required) {
+        display.className = "text-danger fw-bold";
+    } else {
+        display.className = "text-warning fw-bold";
+    }
+}
+
+function checkGridValidity() {
+    // These match the section keys in your EXAM_PATTERNS
+    const sections = ['SecA', 'SecB', 'SecC'];
+    let errorMessages = [];
+
+    sections.forEach(sec => {
+        const display = document.getElementById(`total-${sec}`);
+        const requiredSpan = document.getElementById(`req-${sec}`);
+        
+        // Only validate if the section exists in the current pattern
+        if (display && requiredSpan) {
+            const current = parseInt(display.innerText) || 0;
+            const required = parseInt(requiredSpan.innerText) || 0;
+            
+            if (current !== required) {
+                // Formatting the specific alert message
+                errorMessages.push(`Section ${sec.slice(-1)}: Current input is ${current}, but ${required} is required.`);
+                
+                // Visual feedback: Highlight the error row
+                display.parentElement.classList.add('table-danger');
+            } else {
+                display.parentElement.classList.remove('table-danger');
+            }
+        }
+    });
+
+    if (errorMessages.length > 0) {
+        // Show all missing requirements at once
+        alert("Cannot Generate Paper:\n\n" + errorMessages.join('\n'));
+        return false; // Stop the form from submitting
+    }
+
+    return true; // Everything is correct, proceed to /generate
+}
     function uploadBank() {
     const fileInput = document.getElementById('bankFile');
     const statusDiv = document.getElementById('uploadStatus');
@@ -198,9 +300,17 @@
         statusDiv.innerHTML = '<span class="text-danger">Please select a file first.</span>';
         return;
     }
-
+    const file = fileInput.files[0];
+    const fileName = file.name.toLowerCase();
+    
+    // Check extension
+    if (!fileName.endsWith('.csv') && !fileName.endsWith('.xlsx') && !fileName.endsWith('.xls')) {
+        statusDiv.innerHTML = '<span class="text-danger">❌ Invalid format. Please upload .csv or .xlsx only.</span>';
+        fileInput.value = ''; // Reset the input
+        return;
+    }
     const formData = new FormData();
-    formData.append('file', fileInput.files[0]);
+    formData.append('file', file);
 
     statusDiv.innerHTML = '<span class="text-primary">Uploading bank...</span>';
 

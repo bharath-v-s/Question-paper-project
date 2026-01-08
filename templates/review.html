@@ -46,37 +46,38 @@
             <tr>
                 <th style="width: 80px;">Unit</th>
                 <th style="width: 80px;">Marks</th>
+                <th style="width: 100px;">K Level</th>
                 <th style="width: 100px;">Type</th>
                 <th>Question Text</th>
                 <th style="width: 100px;">Action</th>
             </tr>
         </thead>
         <tbody>
-            {% for q in questions %}
-            <tr>
-                <td>Unit {{ q['Unit'] }}</td>
-                <td><strong>{{ q['Marks'] }}M</strong></td>
-                <td>
-                    {% if q['Type'] %}
-                        <span class="badge {% if q['Type']|lower == 'theory' %}badge-theory{% else %}badge-problem{% endif %}">
-                            {{ q['Type'] }}
-                        </span>
-                    {% else %}
-                        <span class="badge bg-light text-dark">Standard</span>
-                    {% endif %}
-                </td>
-                <td id="q-text-{{ loop.index0 }}">{{ q['Question'] }}</td>
-                <td>
-                    <button type="button" 
-                            class="btn btn-swap" 
-                            id="swap-btn-{{ loop.index0 }}"
-                            onclick="performSwap({{ loop.index0 }})">
-                        🔄 Swap
-                    </button>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
+    {% for q in questions %}
+    <tr>
+        <td>Unit {{ q['Unit'] }}</td>
+        <td><strong>{{ q['Marks'] }}M</strong></td>
+        <td><span class="badge bg-secondary">{{ q['K Level'] }}</span></td>
+        <td>
+            {% if q['Type'] %}
+                <span class="badge {% if q['Type']|lower == 'theory' %}badge-theory{% else %}badge-problem{% endif %}">
+                    {{ q['Type'] }}
+                </span>
+            {% else %}
+                <span class="badge bg-light text-dark">Standard</span>
+            {% endif %} </td>
+        <td id="q-text-{{ loop.index0 }}">{{ q['Question'] }}</td>
+        <td>
+            <button type="button" 
+                    class="btn btn-swap" 
+                    id="swap-btn-{{ loop.index0 }}"
+                    onclick="performSwap({{ loop.index0 }})">
+                🔄 Swap
+            </button>
+        </td>
+    </tr>
+    {% endfor %}
+</tbody>
     </table>
 
     <div class="actions">
@@ -91,12 +92,11 @@
 function performSwap(index) {
     const textCell = document.getElementById(`q-text-${index}`);
     const btn = document.getElementById(`swap-btn-${index}`);
-    
+    const kLevelCell = textCell.parentElement.cells[2].querySelector('.badge');
     // UI Feedback: Disable button and dim text
     btn.disabled = true;
     textCell.classList.add('swapping');
     const originalText = textCell.innerText;
-    textCell.innerText = "Finding replacement...";
 
     fetch(`/swap/${index}`, {
         method: 'POST',
@@ -109,6 +109,9 @@ function performSwap(index) {
         if (data.success) {
             // Update text with new question
             textCell.innerText = data.new_question;
+            if (kLevelCell) {
+                kLevelCell.innerText = data.new_klevel;
+            }
         } else {
             // Revert and show error
             alert(data.message);
