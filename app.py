@@ -45,7 +45,6 @@ class Subject(db.Model):
     code = db.Column(db.String(20))
     semester = db.Column(db.Integer)
     pattern_name = db.Column(db.String(50), default="Pattern_1")
-    
 
 class ExamPattern(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -78,9 +77,16 @@ def load_question_bank(filepath):
             df = pd.read_excel(filepath)
         
         df.columns = df.columns.str.strip()
-        # ['Unit', 'Marks','K Level', 'Question'] is mandatory in the uploaded file
+
         required = ['Unit', 'Marks','K Level', 'Question'] 
         if not all(col in df.columns for col in required):
+            return False
+        
+        # Check if all required columns exist
+        if not all(col in df.columns for col in required):
+            # Find which ones are missing for better debugging
+            missing = [col for col in required if col not in df.columns]
+            print(f"Missing columns: {missing}")
             return False
             
         # Standardize the 'Type' column
@@ -138,40 +144,7 @@ def sample_from_unit(unit_no, marks, count, q_type=None):
     
     return pool.sample(n=count).to_dict('records')
 
-
-# --- EXAM PATTERNS DEFINED AS DICT (for initial migration) ---
-# remove the triple quotes below after migration is done
-"""# --- PATTERNS DATA ---
-EXAM_PATTERNS = {
-    "Pattern_1": {
-        "SecA": {"count": 10, "total": 12, "marks": 3, "note": "Answer any ten questions"},
-        "SecB": {"count": 5, "total": 7, "marks": 6, "note": "Answer any five questions"},
-        "SecC": {"count": 4, "total": 6, "marks": 10, "note": "Answer any four questions"},
-        "total_marks": 100
-    },"Pattern_2": {
-        "SecA": {"count": 10, "total": 12, "marks": 2, "note": "Answer any Ten questions"},
-        "SecB": {"count": 5, "total": 8, "marks": 8, "note": "Answer any five questions"},
-        "SecC": {"count": 2, "total": 3, "marks": 20, "note": "Answer any two questions"},
-        "total_marks": 100
-    },"Pattern_3": {
-        "SecA": {"count": 10, "total": 10, "marks": 2, "note": "Answer all questions"},
-        "SecB": {"count": 5, "total": 8, "marks": 8, "note": "Answer any five questions"},
-        "SecC": {"count": 2, "total": 3, "marks": 20, "note": "Answer any two questions"},
-        "total_marks": 100
-    },"Pattern_4": {
-        "SecA": {"count": 5, "total": 7, "marks": 2, "note": "Answer any five questions"},
-        "SecB": {"count": 4, "total": 6, "marks": 5, "note": "Answer any four questions"},
-        "SecC": {"count": 2, "total": 2, "marks": 20, "note": "Answer any two questions(Internal Choice)"},
-        "total_marks": 50
-    },"Pattern_5": {
-        "SecA": {"count": 20, "total": 20, "marks": 1, "note": "Answer all questions"},
-        "SecB": {"count": 5, "total": 8, "marks": 7, "note": "Answer any five questions"},
-        "SecC": {"count": 3, "total": 5, "marks": 15, "note": "Answer any three questions"},
-        "total_marks": 100
-    }
-
-}"""
-# Predefined Exam Patterns (moved to DB migration section)
+# Predefined Exam Patterns (moved to DB on first run)
 def get_pattern_dict(pattern_name):
     pattern = ExamPattern.query.filter_by(name=pattern_name).first()
     if not pattern:
@@ -195,9 +168,11 @@ def index():
 
 @app.route('/get_departments/<int:sid>/<level>')
 def get_depts(sid, level):
-    #filters departments by both school_id and level
+        #filters departments by both school_id and level
     depts = Department.query.filter_by(school_id=sid, level=level).all()
     return jsonify([{'id': d.id, 'name': d.name} for d in depts])
+
+# --- Updated Route in app.py ---
 
 @app.route('/get_subjects/<int:dept_id>/<int:semester>') # Added <int:semester> to the URL
 def get_subjects(dept_id, semester):
@@ -215,7 +190,7 @@ def get_pattern_details(dept_id, subject_id):
     # Fetch Grid Configuration
     grid_config = db.session.get(GridType, subject.grid_type_id)
     
-    # Fetch pattern from Database instead of EXAM_PATTERNS dict
+    # Fetch from Database instead of EXAM_PATTERNS dict
     pattern_rules = get_pattern_dict(subject.pattern_name or "Pattern_1")
     
     return jsonify({
@@ -236,7 +211,7 @@ def upload():
         success = load_question_bank(path) 
         
         if success:
-            # return success response in upload in index.html
+            # Return JSON instead of redirecting
             return jsonify({
                 "status": "success", 
                 "message": f"Question Bank '{file.filename}' loaded successfully!"
@@ -372,17 +347,14 @@ def download_docx():
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_after = Pt(0)
-    run = title.add_run('Weightage based QUESTION PAPER generator')
+    run = title.add_run('GURU NANAK COLLEGE (AUTONOMOUS), CHENNAI – 42.')
     run.font.size = Pt(13)
     run.bold = True
     
     exam_info = doc.add_paragraph()
     exam_info.alignment = WD_ALIGN_PARAGRAPH.CENTER
     exam_info.paragraph_format.space_after = Pt(0)
-    # --- exam info (static)---
     exam_info.add_run('NOV 2025\n').bold = True
-    # --- exam info (dynamic subject name and code)---
-    #exam_info.add_run(f"{subject_name if subject_name else 'SUBJECT NAME'}\
     exam_info.add_run(f"{subject_obj.code if subject_obj else 'CODE'}").bold = True
 
     # --- Header: Marks & Time ---
@@ -454,27 +426,5 @@ if __name__ == '__main__':
             db.session.commit()
             db.session.add(Department(school_id=s1.id, name="BCA", level="UG"))
             db.session.commit()
-            #remove below code after first run(no need to migrate multiple times(it will duplicate data or cause errors))
-        """if not ExamPattern.query.first():
-            print("Migrating patterns to database...")
-            for p_name, p_data in EXAM_PATTERNS.items():
-                new_pattern = ExamPattern(name=p_name, total_marks=p_data['total_marks'])
-                db.session.add(new_pattern)
-                db.session.flush() # Get the ID for section mapping
-
-                for sec_key, sec_val in p_data.items():
-                    if sec_key.startswith('Sec'):
-                        new_section = PatternSection(
-                            pattern_id=new_pattern.id,
-                            section_name=sec_key,
-                            count=sec_val['count'],
-                            total_in_paper=sec_val['total'],
-                            marks=sec_val['marks'],
-                            note=sec_val['note']
-                        )
-                        db.session.add(new_section)
-            
-            db.session.commit()
-            print("Pattern migration complete.")"""
 
     app.run(debug=True)

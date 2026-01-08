@@ -312,7 +312,7 @@ function checkGridValidity() {
     const formData = new FormData();
     formData.append('file', file);
 
-    statusDiv.innerHTML = '<span class="text-primary">Uploading bank...</span>';
+    statusDiv.innerHTML = '<span class="text-primary">Validating columns...</span>';
 
     fetch('/upload', {
         method: 'POST',
@@ -324,6 +324,7 @@ function checkGridValidity() {
             statusDiv.innerHTML = `<span class="text-success">✅ ${data.message}</span>`;
         } else {
             statusDiv.innerHTML = `<span class="text-danger">❌ ${data.message}</span>`;
+            fileInput.value = '';
         }
     })
     .catch(error => {
