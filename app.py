@@ -29,6 +29,7 @@ class Department(db.Model):
     school_id = db.Column(db.Integer, db.ForeignKey('school.id'))
     name = db.Column(db.String(100))
     level = db.Column(db.String(5))
+    pattern_name = db.Column(db.String(50), default="Pattern_1") # Map to Pattern ID
     subjects = db.relationship('Subject', backref='dept', lazy=True)
     
 class GridType(db.Model):
@@ -45,6 +46,14 @@ class Subject(db.Model):
     code = db.Column(db.String(20))
     semester = db.Column(db.Integer)
     pattern_name = db.Column(db.String(50), default="Pattern_1")
+
+class QuestionBank(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    subject_id = db.Column(db.Integer, db.ForeignKey('subject.id'))
+    unit = db.Column(db.Integer)
+    marks = db.Column(db.Integer)
+    question = db.Column(db.Text)
+    q_type = db.Column(db.String(20))
 
 class ExamPattern(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -77,16 +86,15 @@ def load_question_bank(filepath):
             df = pd.read_excel(filepath)
         
         df.columns = df.columns.str.strip()
-
         required = ['Unit', 'Marks','K Level', 'Question'] 
         if not all(col in df.columns for col in required):
             return False
         
+        missing = [col for col in required if col not in df.columns]
         # Check if all required columns exist
-        if not all(col in df.columns for col in required):
+        if missing:
             # Find which ones are missing for better debugging
-            missing = [col for col in required if col not in df.columns]
-            print(f"Missing columns: {missing}")
+            print(f"Validation Failed. Missing columns: {missing}")
             return False
             
         # Standardize the 'Type' column
@@ -144,7 +152,6 @@ def sample_from_unit(unit_no, marks, count, q_type=None):
     
     return pool.sample(n=count).to_dict('records')
 
-# Predefined Exam Patterns (moved to DB on first run)
 def get_pattern_dict(pattern_name):
     pattern = ExamPattern.query.filter_by(name=pattern_name).first()
     if not pattern:
@@ -164,11 +171,23 @@ def get_pattern_dict(pattern_name):
 @app.route('/')
 def index():
     schools = School.query.all()
-    return render_template('index.html', schools=schools)
+    # Check if a file was already uploaded in this session
+    bank_status = "File loaded" if question_bank_df is not None else None
+    
+   # Retrieve all saved selections
+    saved_data = {
+        "school_id": session.get('selected_school_id', ""),
+        "level": session.get('selected_level', "UG"),
+        "dept_id": session.get('selected_dept_id', ""),
+        "semester": session.get('selected_semester', ""),
+        "subject_id": session.get('selected_subject_id', ""),
+        "bank_status": bank_status
+    }
+    
+    return render_template('index.html', schools=schools, saved=saved_data)
 
 @app.route('/get_departments/<int:sid>/<level>')
 def get_depts(sid, level):
-        #filters departments by both school_id and level
     depts = Department.query.filter_by(school_id=sid, level=level).all()
     return jsonify([{'id': d.id, 'name': d.name} for d in depts])
 
@@ -176,7 +195,7 @@ def get_depts(sid, level):
 
 @app.route('/get_subjects/<int:dept_id>/<int:semester>') # Added <int:semester> to the URL
 def get_subjects(dept_id, semester):
-    #filters subjects by both dept_id and semester
+    # This now correctly receives both arguments from the URL
     subjects = Subject.query.filter_by(dept_id=dept_id, semester=semester).all()
     return jsonify([{'id': s.id, 'name': s.name} for s in subjects])
 
@@ -199,7 +218,7 @@ def get_pattern_details(dept_id, subject_id):
         "pattern_id": subject.pattern_name or "Pattern_1"
     })
 
-#uploads will create a new folder named uploads in the project directory to store uploaded files
+
 @app.route('/upload', methods=['POST'])
 def upload():
     file = request.files.get('file')
@@ -217,11 +236,16 @@ def upload():
                 "message": f"Question Bank '{file.filename}' loaded successfully!"
             })
         else:
+            df_temp = pd.read_excel(path) if path.endswith('.xlsx') else pd.read_csv(path)
+            df_temp.columns = df_temp.columns.astype(str).str.strip()
+            required = ['Unit', 'Marks', 'K Level', 'Question']
+            missing = [col for col in required if col not in df_temp.columns]
+        
+            os.remove(path) # Delete invalid file
             return jsonify({
-                "status": "error", 
-                "message": "Missing required columns: Sl. No, Unit, Marks, K Level, Question"
-            }), 400
-            
+            "status": "error", 
+            "message": f"Missing columns: {', '.join(missing)}"
+            }), 400            
     return jsonify({"status": "error", "message": "No file selected"}), 400
 
 @app.route('/generate', methods=['POST'])
@@ -231,54 +255,65 @@ def generate():
         flash("Please upload a Question Bank first!", "danger")
         return redirect(url_for('index'))
 
-    # 1. Get Subject details to find the correct Pattern
+    # Retrieve Form Data
     subject_id = request.form.get('subject_id')
-    subject_obj = db.session.get(Subject, subject_id)
+    school_id = request.form.get('school_id')
+    level_id = request.form.get('level_id')
+    dept_id = request.form.get('dept_id')
+    semester_id = request.form.get('semester_id')
 
-    # Strictly store these in session for the download and swap routes
+    # Save to Session for Restoration
+    session['selected_school_id'] = school_id
+    session['selected_level'] = level_id
+    session['selected_dept_id'] = dept_id
+    session['selected_semester'] = semester_id
     session['selected_subject_id'] = subject_id
-    session['selected_subject_name'] = subject_obj.name if subject_obj else "Unknown Subject"
     
+    # Save Grid Inputs
+    grid_data = {k: v for k, v in request.form.items() if k.startswith('u')}
+    session['saved_grid'] = grid_data
+    session.modified = True
+
+    subject_obj = db.session.get(Subject, subject_id)
     if not subject_obj:
-        flash("Invalid Subject selected.", "danger")
+        flash("Invalid Subject.", "danger")
         return redirect(url_for('index'))
 
-    # 2. Identify the pattern (e.g., 'Pattern_1')
-    pattern_key = subject_obj.pattern_name if subject_obj.pattern_name else "Pattern_1"
+    session['selected_subject_name'] = subject_obj.name
+    pattern_key = subject_obj.pattern_name or "Pattern_1"
     pattern_data = get_pattern_dict(pattern_key)
+    
     selected_questions = []
-
-    # 3. Process the grid inputs
     for key, value in request.form.items():
-        # Keys from HTML are: u1_SecA_t, u1_SecB_t, etc.
         if value and value.isdigit() and int(value) > 0:
-            parts = key.split('_') 
+            parts = key.split('_')
             if len(parts) < 3: continue
             
-            unit_no = int(parts[0][1:]) # e.g., 1 from 'u1'
-            section = parts[1]           # e.g., 'SecA', 'SecB', or 'SecC'
+            unit_no = int(parts[0][1:])
+            section = parts[1]
             count = int(value)
             q_type = "Theory" if parts[2] == 't' else "Problem"
 
-            # DYNAMIC MARK LOOKUP: Get the marks for this specific section from the pattern
-            # If section is 'SecB', it looks at pattern_data['SecB']['marks']
-            section_config = pattern_data.get(section)
-            if not section_config:
-                continue
-                
-            marks = section_config.get('marks')
-
-            # 4. Sample from the global dataframe
-            qs = sample_from_unit(unit_no, marks, count, q_type)
-            selected_questions.extend(qs)
-            print(f"Searching for: Unit {unit_no}, Marks {marks}, Type {q_type}, Count {count}")
+            sec_cfg = pattern_data.get(section)
+            if sec_cfg:
+                qs = sample_from_unit(unit_no, sec_cfg['marks'], count, q_type)
+                selected_questions.extend(qs)
 
     session['current_paper'] = selected_questions
-    session.modified = True
-    return render_template('review.html', 
-                           questions=selected_questions, 
-                           subject=subject_obj.name, 
-                           qtype="Mixed Pattern")
+    return render_template('review.html', questions=selected_questions, subject=subject_obj.name)
+
+@app.route('/reset')
+def reset():
+    # Clear all session data (grid, subject selections, etc.)
+    session.clear()
+    
+    # Optional: Clear the global question bank variable 
+    # if you want the user to re-upload the file
+    global question_bank_df
+    question_bank_df = None
+    
+    flash("Form and session data have been cleared.", "info")
+    return redirect(url_for('index'))
 
 @app.route('/swap/<int:index>', methods=['POST'])
 def swap(index):
@@ -347,7 +382,7 @@ def download_docx():
     title = doc.add_paragraph()
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     title.paragraph_format.space_after = Pt(0)
-    run = title.add_run('GURU NANAK COLLEGE (AUTONOMOUS), CHENNAI – 42.')
+    run = title.add_run('college name.')
     run.font.size = Pt(13)
     run.bold = True
     

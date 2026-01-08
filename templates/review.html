@@ -33,7 +33,7 @@
     <div class="header-box">
         <div>
             <h2>Review Generated Question Paper 📄</h2>
-            <p class="mb-0">Subject: <strong>{{ subject }}</strong> | Mode: <strong>{{ qtype }}</strong></p>
+            <p class="mb-0">Subject: <strong>{{ subject }}</strong></p>
         </div>
         <div style="text-align: right;">
             <p class="mb-0 text-muted">Total Questions Selected</p>
@@ -81,7 +81,9 @@
     </table>
 
     <div class="actions">
-        <a href="/" class="btn btn-back">⬅ Edit Pattern & Grid</a>
+        <button type="button" class="btn btn-back" onclick="window.history.back();">
+            ⬅ Edit Pattern & Grid
+        </button>
         <div class="d-flex gap-2">
             <a href="{{ url_for('download_docx') }}" class="btn btn-primary">✅ Finalize & Download (.docx)</a>
         </div>
